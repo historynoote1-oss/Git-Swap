@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>git-swap</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #12151b;
+    --surface-2: #161a21;
+    --border: #23272f;
+    --text: #d9dee5;
+    --text-dim: #6b7280;
+    --text-dimmer: #454b54;
+    --add: #3fb950;
+    --add-glow: rgba(63,185,80,0.14);
+    --del: #f0654a;
+    --del-glow: rgba(240,101,74,0.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    background-image: radial-gradient(ellipse 800px 400px at 50% -10%, rgba(63,185,80,0.07), transparent);
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    padding: 32px 14px 60px;
+    font-size: 14px;
+  }
+  .wrap { max-width: 600px; margin: 0 auto; }
+  .title-row { display: flex; align-items: baseline; gap: 10px; }
+  .prompt { color: var(--text-dimmer); font-size: 22px; }
+  h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.02em; display: inline; }
+  .cursor { display: inline-block; width: 9px; height: 19px; background: var(--add); margin-inline-start: 3px; animation: blink 1.1s steps(2) infinite; vertical-align: -3px; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+  header { margin-bottom: 22px; }
+  header p.sub { color: var(--text-dim); font-size: 12.5px; margin: 8px 0 0; direction: rtl; line-height: 1.6; }
+  .warn {
+    background: var(--del-glow);
+    border: 1px solid rgba(240,101,74,0.35);
+    border-right: 3px solid var(--del);
+    color: #f3a08d;
+    padding: 12px 14px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    line-height: 1.75;
+    margin-bottom: 18px;
+    direction: rtl;
+  }
+  .warn b { color: #fff; }
+  .window { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .titlebar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .dot.r { background: var(--del); }
+  .dot.y { background: #d29922; }
+  .dot.g { background: var(--add); }
+  .titlebar span { margin-inline-start: auto; color: var(--text-dimmer); font-size: 11px; direction: ltr; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .body-pad { padding: 20px; }
+  .field { margin-bottom: 15px; direction: rtl; }
+  .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .field .hint { font-size: 11px; color: var(--text-dimmer); margin-top: 5px; line-height: 1.6; }
+  input[type=text], input[type=password] {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 11px 12px; color: var(--text); font-size: 13.5px; outline: none;
+    transition: border-color .15s; direction: ltr; text-align: left; font-family: inherit;
+  }
+  input:focus { border-color: var(--add); }
+  input::placeholder { color: var(--text-dimmer); }
+  select.repo-picker {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; color: var(--text); font-size: 13px; font-family: inherit;
+    margin-bottom: 6px; direction: ltr; outline: none; transition: border-color .15s;
+  }
+  select.repo-picker:disabled { color: var(--text-dimmer); cursor: not-allowed; }
+  select.repo-picker:focus { border-color: var(--add); }
+  .repo-status { font-size: 11px; color: var(--text-dimmer); margin-bottom: 8px; direction: rtl; min-height: 14px; }
+  .repo-status.success { color: var(--add); }
+  .repo-status.error { color: var(--del); }
+  .file-drop {
+    border: 1px dashed var(--border); border-radius: 6px; padding: 16px; text-align: center;
+    cursor: pointer; position: relative; transition: border-color .15s, background .15s;
+  }
+  .file-drop:hover, .file-drop:focus-within { border-color: var(--add); background: var(--add-glow); }
+  .file-drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .file-drop .ph { color: var(--text-dim); font-size: 12.5px; }
+  .file-drop .fname { color: var(--add); font-size: 12px; margin-top: 5px; word-break: break-all; direction: ltr; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); direction: rtl; }
+  .checkbox-row input { width: 15px; height: 15px; accent-color: var(--add); flex: none; }
+  .btn {
+    width: 100%; padding: 13px; border: 1px solid var(--add); border-radius: 6px;
+    background: var(--add-glow); color: var(--add); font-size: 13.5px; font-weight: 700;
+    cursor: pointer; font-family: inherit; transition: background .15s, opacity .15s; direction: rtl;
+  }
+  .btn:hover:not(:disabled) { background: rgba(63,185,80,0.25); }
+  .btn:focus-visible { outline: 2px solid var(--add); outline-offset: 2px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); background: transparent; }
+  .progress-track { height: 3px; background: var(--border); margin-top: 16px; display: none; border-radius: 2px; overflow: hidden; }
+  .progress-track.show { display: block; }
+  .progress-fill { height: 100%; width: 0%; background: var(--add); transition: width .2s linear; }
+  .log {
+    direction: ltr; text-align: left; margin-top: 14px; max-height: 280px; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px;
+    font-size: 12px; line-height: 1.85; display: none;
+  }
+  .log.show { display: block; }
+  .log-line { white-space: pre-wrap; word-break: break-all; color: var(--text-dim); }
+  .log-line.add { color: var(--add); }
+  .log-line.add::before { content: '+ '; }
+  .log-line.del { color: var(--del); }
+  .log-line.del::before { content: '- '; }
+  .log-line.info::before { content: '# '; color: var(--text-dimmer); }
+  .log-line.error { color: var(--del); font-weight: 700; }
+  .log-line.error::before { content: '✗ '; }
+  .log-line.success { color: var(--add); font-weight: 700; }
+  .log-line.success::before { content: '✓ '; }
+  .log-line.hint { color: #d29922; }
+  .log-line.hint::before { content: '→ '; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title-row">
+      <span class="prompt">$</span>
+      <h1>git-swap</h1><span class="cursor"></span>
+    </div>
+    <p class="sub">استبدال كامل لمحتوى أي ريبو بملفات من Zip — مباشرة على GitHub، من غير أي سيرفر وسيط</p>
+  </header>
+
+  <div class="warn">⚠ العملية دي بتمسح <b>كل</b> محتوى الريبو الحالي في الفرع المحدد وتستبدله بمحتوى الـ Zip بالكامل. اتأكد من اسم الريبو والفرع قبل التنفيذ.</div>
+
+  <div class="window">
+    <div class="titlebar">
+      <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+      <span id="titlebarLabel">repo-swap — awaiting input</span>
+    </div>
+    <div class="body-pad">
+      <div class="field">
+        <label>GitHub Personal Access Token</label>
+        <input type="password" id="token" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+        <div class="hint">بيتبعت لـ GitHub مباشرة من متصفحك بس، مش بيتخزن ولا بيمر على أي سيرفر تاني.</div>
+      </div>
+      <div class="field">
+        <label>الريبو</label>
+        <select id="repoPicker" class="repo-picker" disabled>
+          <option value="">حط التوكن الأول عشان تظهر الريبوهات هنا</option>
+        </select>
+        <div class="repo-status" id="repoStatus"></div>
+        <input type="text" id="repo" placeholder="username/reponame" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>الفرع</label>
+        <input type="text" id="branch" placeholder="main" value="main" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>ملف الـ Zip</label>
+        <div class="file-drop">
+          <input type="file" id="zipFile" accept=".zip">
+          <div class="ph">اختار ملف Zip</div>
+          <div class="fname" id="fname"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label class="checkbox-row"><input type="checkbox" id="stripRoot" checked> تجاهل المجلد الرئيسي لو الـ Zip فيه مجلد واحد لافّ كل حاجة</label>
+      </div>
+      <button class="btn" id="deployBtn">امسح القديم وحمّل الجديد</button>
+      <div class="progress-track" id="progressTrack"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const GITHUB_API = 'https://api.github.com';
+const EXCLUDE_PATTERNS = [/(^|\/)\.git\//, /(^|\/)node_modules\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/];
+
+const els = {
+  token: document.getElementById('token'),
+  repo: document.getElementById('repo'),
+  branch: document.getElementById('branch'),
+  file: document.getElementById('zipFile'),
+  fname: document.getElementById('fname'),
+  strip: document.getElementById('stripRoot'),
+  btn: document.getElementById('deployBtn'),
+  progressTrack: document.getElementById('progressTrack'),
+  progressFill: document.getElementById('progressFill'),
+  log: document.getElementById('log'),
+  titlebar: document.getElementById('titlebarLabel'),
+  repoPicker: document.getElementById('repoPicker'),
+  repoStatus: document.getElementById('repoStatus'),
+};
+
+els.file.addEventListener('change', () => {
+  els.fname.textContent = els.file.files[0] ? els.file.files[0].name : '';
+});
+
+els.repo.addEventListener('input', () => {
+  const p = parseRepoInput(els.repo.value);
+  els.titlebar.textContent = p ? `${p.owner}/${p.repo} — git-swap` : 'repo-swap — awaiting input';
+});
+
+let lastFetchedToken = null;
+
+async function fetchAllRepos(token) {
+  let all = [];
+  for (let page = 1; page <= 10; page++) {
+    const res = await githubFetch(`${GITHUB_API}/user/repos?per_page=100&page=${page}&sort=pushed&direction=desc&affiliation=owner,collaborator,organization_member`, token);
+    all = all.concat(res);
+    if (res.length < 100) break;
+  }
+  return all;
+}
+
+function populateRepoPicker(repos) {
+  const picker = els.repoPicker;
+  picker.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = `اختار من ${repos.length} ريبو...`;
+  picker.appendChild(placeholder);
+
+  const groups = {};
+  repos.forEach(r => { (groups[r.owner.login] = groups[r.owner.login] || []).push(r); });
+
+  Object.keys(groups).forEach(owner => {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = owner;
+    groups[owner].forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.full_name;
+      opt.textContent = r.name + (r.private ? ' 🔒' : '');
+      optgroup.appendChild(opt);
+    });
+    picker.appendChild(optgroup);
+  });
+
+  picker.disabled = false;
+}
+
+els.token.addEventListener('blur', async () => {
+  const token = els.token.value.trim();
+  if (!token || token.length < 10 || token === lastFetchedToken) return;
+  lastFetchedToken = token;
+  els.repoStatus.textContent = 'بيجيب الريبوهات...';
+  els.repoStatus.className = 'repo-status';
+  try {
+    const repos = await fetchAllRepos(token);
+    if (repos.length === 0) {
+      els.repoStatus.textContent = 'التوكن شغال بس مفيش ريبوهات ظاهرة له — اكتب الاسم يدوي';
+      els.repoStatus.className = 'repo-status error';
+      return;
+    }
+    populateRepoPicker(repos);
+    els.repoStatus.textContent = `لقيت ${repos.length} ريبو`;
+    els.repoStatus.className = 'repo-status success';
+  } catch (err) {
+    els.repoStatus.textContent = 'مقدرش أجيب الريبوهات — تأكد من التوكن (تقدر لسه تكتب اسم الريبو يدوي تحت)';
+    els.repoStatus.className = 'repo-status error';
+  }
+});
+
+els.repoPicker.addEventListener('change', () => {
+  if (els.repoPicker.value) {
+    els.repo.value = els.repoPicker.value;
+    els.repo.dispatchEvent(new Event('input'));
+  }
+});
+
+function log(msg, type = '') {
+  els.log.classList.add('show');
+  const line = document.createElement('div');
+  line.className = 'log-line' + (type ? ' ' + type : '');
+  line.textContent = msg;
+  els.log.appendChild(line);
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+function setProgress(pct) {
+  els.progressTrack.classList.add('show');
+  els.progressFill.style.width = pct + '%';
+}
+
+function resetUI() {
+  els.log.innerHTML = '';
+  els.log.classList.remove('show');
+  els.progressFill.style.width = '0%';
+  els.progressTrack.classList.remove('show');
+}
+
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function parseRepoInput(input) {
+  input = input.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  const parts = input.split('/').filter(Boolean);
+  if (parts.length >= 2) return { owner: parts[0], repo: parts[1] };
+  return null;
+}
+
+async function githubFetch(url, token, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    }
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); if (j.message) msg = j.message; } catch (e) {}
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+// GitHub's backend can lag for a moment right after creating an object (tree/commit) —
+// referencing it immediately can 404/422 even though the create call itself succeeded.
+// Retry with backoff on exactly that class of error.
+async function githubFetchWithRetry(url, token, options = {}, retries = 3, delayMs = 1200) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await githubFetch(url, token, options);
+    } catch (err) {
+      const transient = err.status === 404 || err.status === 422;
+      if (!transient || i === retries) throw err;
+      log(`GitHub لسه بيسجّل العنصر اللي فات، بحاول تاني (${i + 1}/${retries})...`, 'hint');
+      await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+}
+
+function interpretError(status) {
+  if (status === 401) return 'التوكن مش صحيح أو منتهي الصلاحية';
+  if (status === 403) return 'التوكن مالوش صلاحية كافية — لازم يكون عنده scope اسمه repo، أو Contents: Read & write لو fine-grained';
+  if (status === 404) return 'الريبو مش موجود أو التوكن مالوش وصول عليه';
+  if (status === 422) return 'في مشكلة في البيانات المرسلة، جرب تاني';
+  return null;
+}
+
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const cur = idx++;
+      results[cur] = await fn(items[cur], cur);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+els.btn.addEventListener('click', async () => {
+  resetUI();
+
+  const token = els.token.value.trim();
+  const branch = els.branch.value.trim() || 'main';
+  const parsed = parseRepoInput(els.repo.value);
+  const file = els.file.files[0];
+
+  if (!token) return log('لازم تدخل الـ Token الأول', 'error');
+  if (!parsed) return log('اكتب اسم الريبو بصيغة owner/repo', 'error');
+  if (!file) return log('اختار ملف Zip', 'error');
+
+  const { owner, repo } = parsed;
+
+  if (!confirm(`متأكد؟ هيتم مسح كل محتوى ${owner}/${repo} (فرع ${branch}) واستبداله بمحتوى الـ Zip. الإجراء ده نهائي.`)) return;
+
+  els.btn.disabled = true;
+  els.btn.textContent = 'جاري التنفيذ...';
+
+  try {
+    log(`بتحقق من ${owner}/${repo}...`, 'info');
+    await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}`, token);
+    log('الريبو موجود والتوكن شغال', 'info');
+
+    log('بفك ضغط الملف...', 'info');
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(file);
+    } catch (e) {
+      throw new Error('مقدرش افك ضغط الملف — اتأكد إنه ملف Zip صحيح');
+    }
+
+    let entries = Object.values(zip.files).filter(f => !f.dir);
+
+    entries = entries.filter(f => {
+      const excluded = EXCLUDE_PATTERNS.some(p => p.test(f.name));
+      if (excluded) log(f.name, 'del');
+      return !excluded;
+    });
+
+    if (entries.length === 0) throw new Error('مفيش ملفات صالحة في الـ Zip بعد الفلترة');
+
+    let rootFolder = null;
+    if (els.strip.checked) {
+      const firstParts = new Set(entries.map(f => f.name.split('/')[0]));
+      if (firstParts.size === 1) {
+        const candidate = [...firstParts][0];
+        if (entries.every(f => f.name.startsWith(candidate + '/'))) {
+          rootFolder = candidate;
+          log(`هيتشال المجلد الرئيسي: ${rootFolder}/`, 'info');
+        }
+      }
+    }
+
+    const prepared = entries.map(f => ({
+      entry: f,
+      path: rootFolder ? f.name.substring(rootFolder.length + 1) : f.name
+    }));
+
+    log(`هيتم رفع ${prepared.length} ملف`, 'info');
+
+    let parentSha = null;
+    try {
+      const ref = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/refs/heads/${branch}`, token);
+      parentSha = ref.object.sha;
+    } catch (e) {
+      log(`الفرع "${branch}" هيتعمل من جديد`, 'info');
+    }
+
+    let completed = 0;
+    const blobs = await mapLimit(prepared, 6, async (item) => {
+      const buffer = await item.entry.async('arraybuffer');
+      const base64 = arrayBufferToBase64(buffer);
+      const blob = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/blobs`, token, {
+        method: 'POST',
+        body: JSON.stringify({ content: base64, encoding: 'base64' })
+      });
+      completed++;
+      setProgress(Math.round((completed / prepared.length) * 80));
+      log(item.path, 'add');
+      return { path: item.path, mode: '100644', type: 'blob', sha: blob.sha };
+    });
+
+    log('بعمل الشجرة الجديدة (استبدال كامل)...', 'info');
+    const tree = await githubFetchWithRetry(`${GITHUB_API}/repos/${owner}/${repo}/git/trees`, token, {
+      method: 'POST',
+      body: JSON.stringify({ tree: blobs })
+    });
+    setProgress(88);
+
+    // buffer before referencing the tree we just created — avoids a transient
+    // "Tree SHA does not exist" on the commit call right after a big batch of writes
+    await new Promise(r => setTimeout(r, 900));
+
+    log('بعمل الكوميت...', 'info');
+    const commit = await githubFetchWithRetry(`${GITHUB_API}/repos/${owner}/${repo}/git/commits`, token, {
+      method: 'POST',
+      body: JSON.stringify({
+        message: `استبدال كامل عبر git-swap — ${new Date().toISOString()}`,
+        tree: tree.sha,
+        parents: parentSha ? [parentSha] : []
+      })
+    });
+    setProgress(95);
+
+    log('بتحديث الفرع...', 'info');
+    if (parentSha) {
+      await githubFetchWithRetry(`${GITHUB_API}/repos/${owner}/${repo}/git/refs/heads/${branch}`, token, {
+        method: 'PATCH',
+        body: JSON.stringify({ sha: commit.sha, force: false })
+      });
+    } else {
+      await githubFetchWithRetry(`${GITHUB_API}/repos/${owner}/${repo}/git/refs`, token, {
+        method: 'POST',
+        body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha })
+      });
+    }
+
+    setProgress(100);
+    log(`تم بنجاح — https://github.com/${owner}/${repo}/tree/${branch}`, 'success');
+
+  } catch (err) {
+    log(`خطأ: ${err.message}`, 'error');
+    const hint = interpretError(err.status);
+    if (hint) log(hint, 'hint');
+  } finally {
+    els.btn.disabled = false;
+    els.btn.textContent = 'امسح القديم وحمّل الجديد';
+  }
+});
+</script>
+</body>
+</html>
